@@ -1,0 +1,38 @@
+{
+  "name": "YOK MU? (DEVNET)",
+  "symbol": "YOKMU",
+  "description": "TEST TOKEN — NO VALUE. YOK MU? development token on Solana Devnet. This token has no monetary value and is used only for testing.",
+  "image": "https://yokmucoin-dev.github.io/yokmucoin/yokmucoin-logo.png",
+  "external_url": "https://yokmucoin-dev.github.io/yokmucoin/",
+  "attributes": [
+    {
+      "trait_type": "Network",
+      "value": "Solana Devnet"
+    },
+    {
+      "trait_type": "Category",
+      "value": "Meme"
+    },
+    {
+      "trait_type": "Supply",
+      "value": "1,000,000,000"
+    },
+    {
+      "trait_type": "Decimals",
+      "value": "6"
+    },
+    {
+      "trait_type": "Transfer Tax",
+      "value": "0%"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://yokmucoin-dev.github.io/yokmucoin/yokmucoin-logo.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}
