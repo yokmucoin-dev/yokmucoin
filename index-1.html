@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>YOK MU? Devnet Transfer Test</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:#0b0b0d; color:#f4f4f5; min-height:100vh; display:flex; align-items:center; justify-content:center; }
+    .card { width:min(92vw,520px); background:#17171b; border:1px solid #2b2b31; border-radius:24px; padding:24px; box-sizing:border-box; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+    .logo { width:92px; height:92px; border-radius:50%; display:block; margin:0 auto 12px; }
+    h1 { margin:6px 0 4px; text-align:center; font-size:30px; }
+    .sub { text-align:center; color:#aaaab2; margin-bottom:22px; }
+    .row { background:#101014; border:1px solid #2a2a30; border-radius:16px; padding:14px; margin:10px 0; overflow-wrap:anywhere; }
+    .label { color:#91919a; font-size:13px; margin-bottom:4px; }
+    button { width:100%; border:0; border-radius:16px; padding:16px; font-size:17px; font-weight:700; margin-top:12px; cursor:pointer; }
+    #connect { background:#a78bfa; color:#0b0b0d; }
+    #diagnose { background:#60a5fa; color:#07111f; }
+    #send { background:#22c55e; color:#07120a; }
+    button:disabled { opacity:.38; cursor:not-allowed; }
+    #status { margin-top:16px; padding:14px; border-radius:14px; background:#101014; border:1px solid #2a2a30; min-height:24px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .warn { margin-top:16px; color:#fbbf24; font-size:13px; line-height:1.45; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img class="logo" src="./yokmucoin-logo.png" alt="YOK MU? logo" />
+    <h1>YOK MU? (DEVNET)</h1>
+    <div class="sub">Phantom geri transfer testi — yalnızca Solana Devnet</div>
+
+    <div class="row"><div class="label">Gönderilecek</div><strong>25 YOKMU</strong></div>
+    <div class="row"><div class="label">Alıcı — Playground</div>7Uw3Qejxsi6sVQfqC1vYykTwnuzoBHg9aibofgX47Txh</div>
+    <div class="row"><div class="label">YOKMU mint</div>AGns9fe6C7hDMPAUgjAPEHGwcvvuBp31xDBnq5MBvbtu</div>
+
+    <button id="connect">1 · Phantom'u Bağla</button>
+    <button id="diagnose" disabled>2 · Devnet SOL / Fee Teşhisi</button>
+    <button id="send" disabled>3 · 25 YOKMU İmzala ve Gönder</button>
+
+    <div id="status">Hazır. Phantom içindeki tarayıcıdan bu sayfayı aç ve cüzdanı bağla.</div>
+    <div class="warn">Bu sayfa yalnızca Solana Devnet kullanır. Mainnet sorgusu yapmaz. Seed phrase veya private key istemez. Transfer Phantom imzası olmadan gerçekleşmez.</div>
+  </main>
+
+  <script type="module">
+    import { Connection, PublicKey, Transaction } from "https://esm.sh/@solana/web3.js@1.98.4?bundle";
+    import {
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+      getAssociatedTokenAddressSync,
+      createTransferCheckedInstruction
+    } from "https://esm.sh/@solana/spl-token@0.4.14?bundle";
+
+    const DEVNET_RPC = "https://api.devnet.solana.com";
+    const MINT = new PublicKey("AGns9fe6C7hDMPAUgjAPEHGwcvvuBp31xDBnq5MBvbtu");
+    const RECIPIENT = new PublicKey("7Uw3Qejxsi6sVQfqC1vYykTwnuzoBHg9aibofgX47Txh");
+    const EXPECTED_SENDER = new PublicKey("2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c");
+    const DECIMALS = 6;
+    const RAW_AMOUNT = 25n * 1_000_000n;
+    const connection = new Connection(DEVNET_RPC, "confirmed");
+
+    const status = document.getElementById("status");
+    const connectBtn = document.getElementById("connect");
+    const diagnoseBtn = document.getElementById("diagnose");
+    const sendBtn = document.getElementById("send");
+
+    let provider = null;
+    let wallet = null;
+
+    const setStatus = (m) => status.textContent = m;
+
+    function getProvider() {
+      const p = window.phantom?.solana || window.solana;
+      return p?.isPhantom ? p : null;
+    }
+
+    function getAtas(owner) {
+      return {
+        sourceAta: getAssociatedTokenAddressSync(MINT, owner, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID),
+        destinationAta: getAssociatedTokenAddressSync(MINT, RECIPIENT, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID)
+      };
+    }
+
+    async function buildTransferTx(owner) {
+      const { sourceAta, destinationAta } = getAtas(owner);
+
+      const sourceInfo = await connection.getAccountInfo(sourceAta, "confirmed");
+      if (!sourceInfo) throw new Error("Bağlı Phantom hesabında YOKMU token hesabı bulunamadı.");
+
+      const destinationInfo = await connection.getAccountInfo(destinationAta, "confirmed");
+      if (!destinationInfo) throw new Error("Playground için hedef YOKMU hesabı bulunamadı.");
+
+      const sourceBalance = await connection.getTokenAccountBalance(sourceAta, "confirmed");
+      if (BigInt(sourceBalance.value.amount) < RAW_AMOUNT) throw new Error("Phantom YOKMU bakiyesi 25'ten az.");
+
+      const tx = new Transaction().add(
+        createTransferCheckedInstruction(
+          sourceAta, MINT, destinationAta, owner, RAW_AMOUNT, DECIMALS, [], TOKEN_PROGRAM_ID
+        )
+      );
+
+      const latest = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = latest.blockhash;
+      tx.feePayer = owner;
+
+      return { tx, latest, sourceAta, destinationAta, sourceBalance };
+    }
+
+    connectBtn.addEventListener("click", async () => {
+      try {
+        provider = getProvider();
+        if (!provider) throw new Error("Phantom provider bulunamadı. Sayfayı Phantom uygulama içi tarayıcısında aç.");
+
+        const response = await provider.connect();
+        wallet = response.publicKey;
+
+        if (!wallet.equals(EXPECTED_SENDER)) {
+          diagnoseBtn.disabled = true;
+          sendBtn.disabled = true;
+          throw new Error("Yanlış Phantom hesabı bağlı:\n" + wallet.toBase58());
+        }
+
+        connectBtn.textContent = "Phantom Bağlandı ✓";
+        diagnoseBtn.disabled = false;
+        sendBtn.disabled = true;
+        setStatus("Bağlandı:\n" + wallet.toBase58() + "\n\nŞimdi Devnet SOL / Fee Teşhisi'ne bas.");
+      } catch (e) {
+        setStatus("HATA: " + (e?.message || String(e)));
+      }
+    });
+
+    diagnoseBtn.addEventListener("click", async () => {
+      try {
+        if (!wallet) throw new Error("Önce Phantom'u bağla.");
+
+        const { tx, sourceBalance } = await buildTransferTx(wallet);
+        const lamports = await connection.getBalance(wallet, "confirmed");
+        const devnetSol = lamports / 1_000_000_000;
+
+        const feeInfo = await connection.getFeeForMessage(tx.compileMessage(), "confirmed");
+        const sim = await connection.simulateTransaction(tx);
+
+        const feeSol = feeInfo.value == null ? "okunamadı" : (feeInfo.value / 1_000_000_000).toFixed(9);
+        const simResult = sim.value.err == null ? "BAŞARILI" : "HATA: " + JSON.stringify(sim.value.err);
+
+        setStatus(
+          "Bağlı Phantom:\n" + wallet.toBase58() +
+          "\n\nDevnet SOL: " + devnetSol + " SOL" +
+          "\nYOKMU bakiye: " + sourceBalance.value.uiAmountString + " YOKMU" +
+          "\nFee payer:\n" + wallet.toBase58() +
+          "\nTahmini Devnet işlem ücreti: " + feeSol + " SOL" +
+          "\nAlıcı YOKMU hesabı: VAR" +
+          "\nDEVNET simülasyonu: " + simResult
+        );
+
+        sendBtn.disabled = !(sim.value.err == null && feeInfo.value != null && lamports > feeInfo.value);
+      } catch (e) {
+        sendBtn.disabled = true;
+        setStatus("HATA: " + (e?.message || String(e)));
+      }
+    });
+
+    sendBtn.addEventListener("click", async () => {
+      try {
+        if (!provider || !wallet) throw new Error("Önce Phantom'u bağla.");
+        if (!wallet.equals(EXPECTED_SENDER)) throw new Error("Yanlış Phantom hesabı.");
+
+        sendBtn.disabled = true;
+
+        const { tx, latest, sourceAta, destinationAta } = await buildTransferTx(wallet);
+
+        setStatus("Phantom yalnızca imza için açılıyor...\n25 YOKMU → " + RECIPIENT.toBase58());
+
+        const signedTx = await provider.signTransaction(tx);
+
+        setStatus("Phantom imzası alındı.\nİmzalı işlem doğrudan Solana Devnet RPC'ye gönderiliyor...");
+
+        const signature = await connection.sendRawTransaction(
+          signedTx.serialize(),
+          { skipPreflight: false, preflightCommitment: "confirmed" }
+        );
+
+        await connection.confirmTransaction(
+          { signature, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
+          "confirmed"
+        );
+
+        const sourceAfter = await connection.getTokenAccountBalance(sourceAta, "confirmed");
+        const destinationAfter = await connection.getTokenAccountBalance(destinationAta, "confirmed");
+
+        setStatus(
+          "TRANSFER BAŞARILI ✓" +
+          "\n\nPhantom kalan: " + sourceAfter.value.uiAmountString + " YOKMU" +
+          "\nPlayground bakiye: " + destinationAfter.value.uiAmountString + " YOKMU" +
+          "\n\nTX:\n" + signature
+        );
+
+        sendBtn.textContent = "Transfer Tamamlandı ✓";
+      } catch (e) {
+        sendBtn.disabled = false;
+        setStatus("HATA: " + (e?.message || String(e)));
+      }
+    });
+  </script>
+</body>
+</html>
