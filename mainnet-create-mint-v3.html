@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>YOK MU? Mainnet Mint — Phantom Gönderimli</title>
+  <style>
+    :root{color-scheme:dark}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0b0d;color:#f4f4f5;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    .card{width:min(92vw,580px);background:#17171b;border:1px solid #2b2b31;border-radius:24px;padding:24px;box-sizing:border-box;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+    .logo{width:92px;height:92px;border-radius:50%;display:block;margin:0 auto 12px}
+    h1{margin:6px 0 4px;text-align:center;font-size:30px}
+    .sub{text-align:center;color:#aaaab2;margin-bottom:22px}
+    .row{background:#101014;border:1px solid #2a2a30;border-radius:16px;padding:14px;margin:10px 0;overflow-wrap:anywhere}
+    .label{color:#91919a;font-size:13px;margin-bottom:4px}
+    button{width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:750;margin-top:12px;cursor:pointer}
+    button:disabled{opacity:.36;cursor:not-allowed}
+    #connect{background:#a78bfa;color:#0b0b0d}
+    #check{background:#60a5fa;color:#07111f}
+    #candidate{background:#fbbf24;color:#1b1200}
+    #simulate{background:#38bdf8;color:#04131a}
+    #create{background:#22c55e;color:#07120a}
+    #status{margin-top:16px;padding:14px;border-radius:14px;background:#101014;border:1px solid #2a2a30;min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.42}
+    .warn{margin-top:16px;color:#fbbf24;font-size:13px;line-height:1.5}
+  </style>
+</head>
+<body>
+<main class="card">
+  <img class="logo" src="./yokmucoin-logo.png" alt="YOK MU? logo">
+  <h1>YOK MU? — MAINNET</h1>
+  <div class="sub">Aşama 1 — Phantom imzalar ve kendisi gönderir</div>
+
+  <div class="row">
+    <div class="label">Phantom / mint authority / fee payer</div>
+    <strong>2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c</strong>
+  </div>
+
+  <div class="row">
+    <div class="label">Mint parametreleri</div>
+    6 decimals · başlangıç supply 0 · freeze authority YOK
+  </div>
+
+  <button id="connect">1 · Phantom'u Bağla</button>
+  <button id="check" disabled>2 · Mainnet Kontrolü</button>
+  <button id="candidate" disabled>3 · Tek İmzalı Mint Adayı Üret</button>
+  <button id="simulate" disabled>4 · RPC'de Simüle Et (imza yok)</button>
+  <button id="create" disabled>5 · Phantom ile İmzala + Gönder</button>
+
+  <div id="status">Phantom'da Testnet Mode kapalı olmalı.</div>
+
+  <div class="warn">
+    Bu sürümde Phantom'un resmi olarak önerdiği signAndSendTransaction akışı kullanılır.
+    Phantom normal onay ekranını gösterirse işlemi inceleyip onaylayabilirsin.
+    Kırmızı “İstek engellendi / dApp kötü amaçlı olabilir” uyarısı çıkarsa devam etme.
+  </div>
+</main>
+
+<script type="module">
+  import {
+    Connection, PublicKey, SystemProgram, Transaction
+  } from "https://esm.sh/@solana/web3.js@1.98.4?bundle";
+
+  import {
+    TOKEN_PROGRAM_ID, MINT_SIZE, createInitializeMintInstruction, getMint
+  } from "https://esm.sh/@solana/spl-token@0.4.14?bundle";
+
+  const RPC = "https://solana-rpc.publicnode.com";
+  const EXPECTED = new PublicKey("2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c");
+  const DECIMALS = 6;
+  const connection = new Connection(RPC, "confirmed");
+
+  const $ = id => document.getElementById(id);
+  const connectBtn = $("connect"), checkBtn = $("check"), candidateBtn = $("candidate");
+  const simulateBtn = $("simulate"), createBtn = $("create"), status = $("status");
+
+  let provider = null, wallet = null, rent = null, seed = null, mintPubkey = null;
+
+  const setStatus = t => status.textContent = t;
+
+  function getProvider(){
+    const p = window.phantom?.solana || window.solana;
+    return p?.isPhantom ? p : null;
+  }
+
+  function randomSeed(){
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    return Array.from(b, x => x.toString(16).padStart(2,"0")).join("");
+  }
+
+  async function buildTx(){
+    if(!wallet || !mintPubkey || rent == null || !seed) {
+      throw new Error("Önce 1–3 adımlarını tamamla.");
+    }
+
+    const latest = await connection.getLatestBlockhash("confirmed");
+
+    const tx = new Transaction().add(
+      SystemProgram.createAccountWithSeed({
+        fromPubkey: wallet,
+        newAccountPubkey: mintPubkey,
+        basePubkey: wallet,
+        seed,
+        lamports: rent,
+        space: MINT_SIZE,
+        programId: TOKEN_PROGRAM_ID
+      }),
+      createInitializeMintInstruction(
+        mintPubkey,
+        DECIMALS,
+        wallet,
+        null,
+        TOKEN_PROGRAM_ID
+      )
+    );
+
+    tx.feePayer = wallet;
+    tx.recentBlockhash = latest.blockhash;
+    return { tx, latest };
+  }
+
+  connectBtn.onclick = async () => {
+    try{
+      provider = getProvider();
+      if(!provider) throw new Error("Phantom provider bulunamadı. Sayfayı Phantom içinden aç.");
+      const r = await provider.connect();
+      wallet = r.publicKey;
+
+      if(!wallet.equals(EXPECTED)) {
+        throw new Error("Yanlış Phantom hesabı:\n" + wallet.toBase58());
+      }
+
+      connectBtn.textContent = "Phantom Bağlandı ✓";
+      checkBtn.disabled = false;
+      setStatus("Doğru Phantom hesabı bağlı:\n" + wallet.toBase58());
+    }catch(e){
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+
+  checkBtn.onclick = async () => {
+    try{
+      if(!wallet) throw new Error("Önce Phantom'u bağla.");
+
+      const [lamports, r] = await Promise.all([
+        connection.getBalance(wallet,"confirmed"),
+        connection.getMinimumBalanceForRentExemption(MINT_SIZE)
+      ]);
+
+      rent = r;
+      const sol = lamports / 1e9;
+
+      if(sol < 0.01) throw new Error("Mainnet SOL bakiyesi düşük: " + sol + " SOL");
+
+      candidateBtn.disabled = false;
+      simulateBtn.disabled = true;
+      createBtn.disabled = true;
+
+      setStatus(
+        "MAINNET KONTROLÜ BAŞARILI ✓" +
+        "\nMainnet SOL: " + sol + " SOL" +
+        "\nMint rent: " + (rent/1e9).toFixed(9) + " SOL" +
+        "\nDecimals: 6" +
+        "\nFreeze authority: YOK"
+      );
+    }catch(e){
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+
+  candidateBtn.onclick = async () => {
+    try{
+      seed = randomSeed();
+      mintPubkey = await PublicKey.createWithSeed(wallet, seed, TOKEN_PROGRAM_ID);
+
+      const existing = await connection.getAccountInfo(mintPubkey,"confirmed");
+      if(existing) throw new Error("Türetilen mint adresi zaten mevcut. Yeni aday üret.");
+
+      simulateBtn.disabled = false;
+      createBtn.disabled = true;
+
+      setStatus(
+        "MINT ADAYI HAZIR ✓" +
+        "\n\nMint:\n" + mintPubkey.toBase58() +
+        "\n\nHenüz zincire işlem gönderilmedi."
+      );
+    }catch(e){
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+
+  simulateBtn.onclick = async () => {
+    try{
+      const {tx} = await buildTx();
+      const sim = await connection.simulateTransaction(tx);
+
+      if(sim.value.err) {
+        throw new Error("RPC simülasyonu başarısız:\n" + JSON.stringify(sim.value.err));
+      }
+
+      const feeInfo = await connection.getFeeForMessage(tx.compileMessage(),"confirmed");
+      const feeSol = feeInfo.value == null ? "okunamadı" : (feeInfo.value/1e9).toFixed(9);
+
+      createBtn.disabled = false;
+
+      setStatus(
+        "RPC MAINNET SİMÜLASYONU BAŞARILI ✓" +
+        "\n\nMint:\n" + mintPubkey.toBase58() +
+        "\nDecimals: 6" +
+        "\nSupply: 0" +
+        "\nMint authority: " + wallet.toBase58() +
+        "\nFreeze authority: YOK" +
+        "\nTahmini işlem ücreti: " + feeSol + " SOL" +
+        "\nMint rent: " + (rent/1e9).toFixed(9) + " SOL" +
+        "\n\n5. adım gerçek Mainnet işlemidir."
+      );
+    }catch(e){
+      createBtn.disabled = true;
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+
+  createBtn.onclick = async () => {
+    try{
+      createBtn.disabled = true;
+
+      // Mint candidate must still not exist.
+      const before = await connection.getAccountInfo(mintPubkey,"confirmed");
+      if(before) {
+        throw new Error("Mint adayı zaten zincirde mevcut. İşlem tekrar gönderilmedi.");
+      }
+
+      const {tx, latest} = await buildTx();
+
+      setStatus(
+        "Phantom onayı bekleniyor..." +
+        "\n\nGERÇEK MAINNET mint:\n" + mintPubkey.toBase58() +
+        "\nDecimals: 6 · Supply: 0 · Freeze authority: YOK"
+      );
+
+      // Phantom's recommended flow: wallet signs AND sends.
+      const result = await provider.signAndSendTransaction(tx);
+      const signature = result?.signature;
+
+      if(!signature) {
+        throw new Error("Phantom işlem imzası döndürmedi.");
+      }
+
+      setStatus(
+        "Phantom işlemi gönderdi ✓" +
+        "\nTX:\n" + signature +
+        "\n\nMainnet onayı bekleniyor..."
+      );
+
+      await connection.confirmTransaction(
+        {
+          signature,
+          blockhash: latest.blockhash,
+          lastValidBlockHeight: latest.lastValidBlockHeight
+        },
+        "confirmed"
+      );
+
+      const info = await getMint(connection,mintPubkey,"confirmed",TOKEN_PROGRAM_ID);
+
+      const ok =
+        info.decimals === DECIMALS &&
+        info.supply === 0n &&
+        info.freezeAuthority === null &&
+        info.mintAuthority?.equals(wallet);
+
+      if(!ok) {
+        throw new Error(
+          "Mint oluşturuldu fakat doğrulama beklenen parametrelerle eşleşmedi. " +
+          "Başka işlem yapma."
+        );
+      }
+
+      setStatus(
+        "MAINNET MINT BAŞARIYLA OLUŞTURULDU ✓" +
+        "\n\nYOKMU MINT:\n" + mintPubkey.toBase58() +
+        "\nDecimals: 6" +
+        "\nSupply: 0" +
+        "\nMint authority:\n" + info.mintAuthority.toBase58() +
+        "\nFreeze authority: YOK" +
+        "\n\nTX:\n" + signature +
+        "\n\nDUR: Henüz 1 milyar YOKMU basılmadı ve metadata bağlanmadı."
+      );
+
+      createBtn.textContent = "Mainnet Mint Oluşturuldu ✓";
+    }catch(e){
+      createBtn.disabled = false;
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+</script>
+</body>
+</html>
