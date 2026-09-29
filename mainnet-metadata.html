@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>YOK MU? Mainnet Metadata</title>
+  <style>
+    :root{color-scheme:dark}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0b0d;color:#f4f4f5;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    .card{width:min(92vw,620px);background:#17171b;border:1px solid #2b2b31;border-radius:24px;padding:24px;box-sizing:border-box;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+    .logo{width:92px;height:92px;border-radius:50%;display:block;margin:0 auto 12px}
+    h1{margin:6px 0 4px;text-align:center;font-size:30px}
+    .sub{text-align:center;color:#aaaab2;margin-bottom:22px}
+    .row{background:#101014;border:1px solid #2a2a30;border-radius:16px;padding:14px;margin:10px 0;overflow-wrap:anywhere}
+    .label{color:#91919a;font-size:13px;margin-bottom:4px}
+    button{width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:750;margin-top:12px;cursor:pointer}
+    button:disabled{opacity:.36;cursor:not-allowed}
+    #connect{background:#a78bfa;color:#0b0b0d}
+    #check{background:#60a5fa;color:#07111f}
+    #simulate{background:#38bdf8;color:#04131a}
+    #create{background:#22c55e;color:#07120a}
+    #status{margin-top:16px;padding:14px;border-radius:14px;background:#101014;border:1px solid #2a2a30;min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
+    .warn{margin-top:16px;color:#fbbf24;font-size:13px;line-height:1.5}
+  </style>
+</head>
+<body>
+<main class="card">
+  <img class="logo" src="./yokmucoin-logo.png" alt="YOK MU? logo">
+  <h1>YOK MU? — MAINNET</h1>
+  <div class="sub">Aşama 3: Metaplex metadata hesabını oluştur</div>
+
+  <div class="row">
+    <div class="label">Mainnet mint</div>
+    <strong>37gh9QSL2AYJy7VY3i6CdUErxzk9rcsW7aHsP9eVqe71</strong>
+  </div>
+
+  <div class="row">
+    <div class="label">On-chain metadata</div>
+    Name: <strong>YOK MU?</strong><br>
+    Symbol: <strong>YOKMU</strong><br>
+    Seller fee: <strong>0</strong><br>
+    Update authority: <strong>Phantom</strong><br>
+    Mutable: <strong>EVET</strong>
+  </div>
+
+  <div class="row">
+    <div class="label">Off-chain metadata URI</div>
+    https://yokmucoin-dev.github.io/yokmucoin/yokmu.json
+  </div>
+
+  <button id="connect">1 · Phantom'u Bağla</button>
+  <button id="check" disabled>2 · Mint + Arz + JSON Kontrolü</button>
+  <button id="simulate" disabled>3 · Metadata İşlemini Simüle Et</button>
+  <button id="create" disabled>4 · MAINNET METADATA OLUŞTUR</button>
+
+  <div id="status">Önce Phantom'u bağla. Testnet Mode kapalı olmalı.</div>
+
+  <div class="warn">
+    Metadata şimdilik mutable bırakılır; böylece ileride URI'yi yokmucoin.com, IPFS veya
+    Arweave gibi kalıcı bir adrese taşıyabiliriz. Bu işlem arzı değiştirmez ve mint authority'yi kaldırmaz.
+    Phantom kırmızı “İstek engellendi” uyarısı gösterirse devam etme.
+  </div>
+</main>
+
+<script type="module">
+  import {
+    Connection,
+    PublicKey,
+    Transaction
+  } from "https://esm.sh/@solana/web3.js@1.98.4?bundle";
+
+  import {
+    TOKEN_PROGRAM_ID,
+    getMint
+  } from "https://esm.sh/@solana/spl-token@0.4.14?bundle";
+
+  import {
+    createCreateMetadataAccountV3Instruction
+  } from "https://esm.sh/@metaplex-foundation/mpl-token-metadata@2.13.0?deps=@solana/web3.js@1.98.4";
+
+  const RPC = "https://solana-rpc.publicnode.com";
+  const WALLET = new PublicKey("2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c");
+  const MINT = new PublicKey("37gh9QSL2AYJy7VY3i6CdUErxzk9rcsW7aHsP9eVqe71");
+  const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+  const URI = "https://yokmucoin-dev.github.io/yokmucoin/yokmu.json";
+  const EXPECTED_SUPPLY = 1_000_000_000n * 1_000_000n;
+
+  const connection = new Connection(RPC, "confirmed");
+
+  const $ = id => document.getElementById(id);
+  const connectBtn = $("connect");
+  const checkBtn = $("check");
+  const simulateBtn = $("simulate");
+  const createBtn = $("create");
+  const status = $("status");
+
+  let provider = null;
+  let connected = null;
+  let metadataPda = null;
+
+  const setStatus = t => status.textContent = t;
+
+  function getProvider(){
+    const p = window.phantom?.solana || window.solana;
+    return p?.isPhantom ? p : null;
+  }
+
+  function deriveMetadataPda(){
+    const encoder = new TextEncoder();
+    return PublicKey.findProgramAddressSync(
+      [
+        encoder.encode("metadata"),
+        METADATA_PROGRAM_ID.toBytes(),
+        MINT.toBytes()
+      ],
+      METADATA_PROGRAM_ID
+    )[0];
+  }
+
+  async function validateMint(){
+    const m = await getMint(connection, MINT, "confirmed", TOKEN_PROGRAM_ID);
+
+    if(m.decimals !== 6) throw new Error("Decimals 6 değil.");
+    if(m.supply !== EXPECTED_SUPPLY) {
+      throw new Error("Toplam arz tam 1,000,000,000 YOKMU değil.");
+    }
+    if(!m.mintAuthority || !m.mintAuthority.equals(WALLET)) {
+      throw new Error("Mint authority beklenen Phantom hesabı değil.");
+    }
+    if(m.freezeAuthority !== null) {
+      throw new Error("Freeze authority beklenmedik şekilde mevcut.");
+    }
+    return m;
+  }
+
+  async function validateJson(){
+    const r = await fetch(URI + "?t=" + Date.now(), {cache:"no-store"});
+    if(!r.ok) throw new Error("Metadata JSON HTTP hatası: " + r.status);
+
+    const j = await r.json();
+
+    if(j?.name !== "YOK MU?") throw new Error("JSON name yanlış.");
+    if(j?.symbol !== "YOKMU") throw new Error("JSON symbol yanlış.");
+    if(!j?.image) throw new Error("JSON image alanı yok.");
+
+    const img = await fetch(j.image + "?t=" + Date.now(), {cache:"no-store"});
+    if(!img.ok) throw new Error("Logo URL okunamadı: HTTP " + img.status);
+
+    return j;
+  }
+
+  function buildMetadataInstruction(){
+    return createCreateMetadataAccountV3Instruction(
+      {
+        metadata: metadataPda,
+        mint: MINT,
+        mintAuthority: WALLET,
+        payer: WALLET,
+        updateAuthority: WALLET
+      },
+      {
+        createMetadataAccountArgsV3: {
+          data: {
+            name: "YOK MU?",
+            symbol: "YOKMU",
+            uri: URI,
+            sellerFeeBasisPoints: 0,
+            creators: null,
+            collection: null,
+            uses: null
+          },
+          isMutable: true,
+          collectionDetails: null
+        }
+      }
+    );
+  }
+
+  async function buildTx(){
+    const latest = await connection.getLatestBlockhash("confirmed");
+    const tx = new Transaction().add(buildMetadataInstruction());
+    tx.feePayer = WALLET;
+    tx.recentBlockhash = latest.blockhash;
+    return {tx, latest};
+  }
+
+  async function waitForSignature(signature, maxMs=90000){
+    const start = Date.now();
+    while(Date.now()-start < maxMs){
+      const r = await connection.getSignatureStatuses(
+        [signature],
+        {searchTransactionHistory:true}
+      );
+      const s = r.value[0];
+      if(s){
+        if(s.err) throw new Error("Mainnet transaction hata verdi: "+JSON.stringify(s.err));
+        if(s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized"){
+          return s.confirmationStatus;
+        }
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    return "timeout";
+  }
+
+  connectBtn.onclick = async () => {
+    try{
+      provider = getProvider();
+      if(!provider) throw new Error("Phantom provider bulunamadı. Sayfayı Phantom içinden aç.");
+
+      const r = await provider.connect();
+      connected = r.publicKey;
+
+      if(!connected.equals(WALLET)){
+        throw new Error("Yanlış Phantom hesabı:\n"+connected.toBase58());
+      }
+
+      connectBtn.textContent = "Phantom Bağlandı ✓";
+      checkBtn.disabled = false;
+      simulateBtn.disabled = true;
+      createBtn.disabled = true;
+
+      setStatus("Doğru Phantom hesabı bağlı:\n"+connected.toBase58());
+    }catch(e){
+      setStatus("HATA: "+(e?.message||String(e)));
+    }
+  };
+
+  checkBtn.onclick = async () => {
+    try{
+      if(!connected) throw new Error("Önce Phantom'u bağla.");
+
+      setStatus("Mint, metadata PDA, JSON ve logo kontrol ediliyor...");
+
+      const [mintInfo, json, lamports] = await Promise.all([
+        validateMint(),
+        validateJson(),
+        connection.getBalance(WALLET, "confirmed")
+      ]);
+
+      metadataPda = deriveMetadataPda();
+
+      const existing = await connection.getAccountInfo(metadataPda, "confirmed");
+      if(existing){
+        simulateBtn.disabled = true;
+        createBtn.disabled = true;
+        throw new Error(
+          "Bu mint için Metaplex metadata hesabı zaten VAR.\nMetadata PDA:\n" +
+          metadataPda.toBase58() +
+          "\n\nTekrar oluşturma yapılmayacak."
+        );
+      }
+
+      setStatus(
+        "KONTROL BAŞARILI ✓"+
+        "\n\nMint:\n"+MINT.toBase58()+
+        "\nSupply: 1,000,000,000 YOKMU"+
+        "\nDecimals: 6"+
+        "\nMint authority: DOĞRU"+
+        "\nFreeze authority: YOK"+
+        "\nMainnet SOL: "+(lamports/1e9)+" SOL"+
+        "\n\nMetadata PDA:\n"+metadataPda.toBase58()+
+        "\nMetadata hesabı: henüz YOK"+
+        "\nJSON: OK"+
+        "\nName: "+json.name+
+        "\nSymbol: "+json.symbol+
+        "\nLogo: OK"+
+        "\nURI:\n"+URI
+      );
+
+      simulateBtn.disabled = false;
+      createBtn.disabled = true;
+    }catch(e){
+      simulateBtn.disabled = true;
+      createBtn.disabled = true;
+      setStatus("HATA: "+(e?.message||String(e)));
+    }
+  };
+
+  simulateBtn.onclick = async () => {
+    try{
+      if(!metadataPda) throw new Error("Önce 2. kontrolü çalıştır.");
+
+      // Re-check account still absent.
+      const existing = await connection.getAccountInfo(metadataPda, "confirmed");
+      if(existing) throw new Error("Metadata hesabı artık mevcut. İşlem durduruldu.");
+
+      const {tx} = await buildTx();
+
+      const sim = await connection.simulateTransaction(tx);
+      if(sim.value.err){
+        throw new Error(
+          "Mainnet metadata simülasyonu başarısız:\n"+
+          JSON.stringify(sim.value.err)+
+          "\n\nLogs:\n"+
+          (sim.value.logs || []).join("\n")
+        );
+      }
+
+      const fee = await connection.getFeeForMessage(tx.compileMessage(),"confirmed");
+      const feeSol = fee.value == null ? "okunamadı" : (fee.value/1e9).toFixed(9);
+
+      setStatus(
+        "METADATA MAINNET SİMÜLASYONU BAŞARILI ✓"+
+        "\n\nMetadata PDA:\n"+metadataPda.toBase58()+
+        "\nName: YOK MU?"+
+        "\nSymbol: YOKMU"+
+        "\nURI:\n"+URI+
+        "\nSeller fee: 0"+
+        "\nUpdate authority: Phantom"+
+        "\nMutable: EVET"+
+        "\nTahmini network fee: "+feeSol+" SOL"+
+        "\n\nHenüz hiçbir işlem imzalanmadı."
+      );
+
+      createBtn.disabled = false;
+    }catch(e){
+      createBtn.disabled = true;
+      setStatus("HATA: "+(e?.message||String(e)));
+    }
+  };
+
+  createBtn.onclick = async () => {
+    try{
+      createBtn.disabled = true;
+      simulateBtn.disabled = true;
+
+      await validateMint();
+
+      const existing = await connection.getAccountInfo(metadataPda, "confirmed");
+      if(existing){
+        throw new Error("Metadata hesabı zaten mevcut. Tekrar gönderilmedi.");
+      }
+
+      const {tx} = await buildTx();
+
+      setStatus(
+        "Phantom onayı bekleniyor..."+
+        "\n\nGERÇEK MAINNET METADATA İŞLEMİ"+
+        "\nName: YOK MU? · Symbol: YOKMU"+
+        "\nMetadata PDA:\n"+metadataPda.toBase58()
+      );
+
+      const result = await provider.signAndSendTransaction(tx);
+      const signature = result?.signature;
+      if(!signature) throw new Error("Phantom transaction signature döndürmedi.");
+
+      setStatus(
+        "Phantom metadata işlemini gönderdi ✓"+
+        "\n\nTX:\n"+signature+
+        "\n\nZincir durumu kontrol ediliyor..."
+      );
+
+      const confirmation = await waitForSignature(signature,90000);
+
+      // Verify the on-chain Metadata PDA exists and is owned by the Metadata program.
+      const account = await connection.getAccountInfo(metadataPda,"confirmed");
+
+      if(!account){
+        throw new Error(
+          "İmza alındı ancak metadata hesabı henüz okunamıyor.\nTX:\n"+
+          signature+
+          "\n\nTEKRAR BASMA. Daha sonra yeniden kontrol et."
+        );
+      }
+
+      if(!account.owner.equals(METADATA_PROGRAM_ID)){
+        throw new Error(
+          "Metadata PDA oluştu fakat owner beklenen Metaplex programı değil. Başka işlem yapma."
+        );
+      }
+
+      setStatus(
+        "MAINNET METADATA BAŞARIYLA OLUŞTURULDU ✓"+
+        "\n\nMint:\n"+MINT.toBase58()+
+        "\nMetadata PDA:\n"+metadataPda.toBase58()+
+        "\nName: YOK MU?"+
+        "\nSymbol: YOKMU"+
+        "\nURI:\n"+URI+
+        "\nUpdate authority: Phantom"+
+        "\nMutable: EVET"+
+        "\nConfirmation: "+confirmation+
+        "\n\nTX:\n"+signature+
+        "\n\nDUR: Şimdi Explorer/Phantom görünümünü kontrol edeceğiz. Mint authority henüz kaldırılmadı."
+      );
+
+      createBtn.textContent = "Metadata Oluşturuldu ✓";
+    }catch(e){
+      createBtn.disabled = true;
+      setStatus("HATA / DURUM:\n"+(e?.message||String(e)));
+    }
+  };
+</script>
+</body>
+</html>
