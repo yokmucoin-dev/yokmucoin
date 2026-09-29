@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>YOK MU? Mainnet İşlem Kontrolü</title>
+  <style>
+    :root{color-scheme:dark}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0b0d;color:#f4f4f5;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    .card{width:min(92vw,620px);background:#17171b;border:1px solid #2b2b31;border-radius:24px;padding:24px;box-sizing:border-box}
+    h1{margin:0 0 8px;text-align:center}
+    .sub{text-align:center;color:#aaaab2;margin-bottom:20px}
+    .row{background:#101014;border:1px solid #2a2a30;border-radius:16px;padding:14px;margin:10px 0;overflow-wrap:anywhere}
+    button{width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:750;margin-top:12px;background:#60a5fa;color:#07111f}
+    #status{margin-top:16px;padding:14px;border-radius:14px;background:#101014;border:1px solid #2a2a30;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
+    .warn{margin-top:14px;color:#fbbf24;font-size:13px;line-height:1.45}
+  </style>
+</head>
+<body>
+<main class="card">
+  <h1>YOK MU? — Mainnet Kurtarma Kontrolü</h1>
+  <div class="sub">İmza istemez, işlem göndermez; sadece son mainnet işlemlerini okur.</div>
+
+  <div class="row">
+    Phantom:
+    <br><strong>2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c</strong>
+  </div>
+
+  <button id="check">Son işlemlerde oluşturulmuş YOKMU mintini ara</button>
+  <div id="status">Hazır.</div>
+
+  <div class="warn">
+    Sonuç bulunursa 5. adıma tekrar basmayın. Önce bulunan mint adresini doğrulayacağız.
+  </div>
+</main>
+
+<script type="module">
+  import { Connection, PublicKey } from "https://esm.sh/@solana/web3.js@1.98.4?bundle";
+  import { TOKEN_PROGRAM_ID, getMint } from "https://esm.sh/@solana/spl-token@0.4.14?bundle";
+
+  const RPC = "https://solana-rpc.publicnode.com";
+  const WALLET = new PublicKey("2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c");
+  const connection = new Connection(RPC, "confirmed");
+  const status = document.getElementById("status");
+
+  function out(t){ status.textContent = t; }
+
+  document.getElementById("check").onclick = async () => {
+    try {
+      out("Son mainnet işlemleri taranıyor...");
+
+      const sigs = await connection.getSignaturesForAddress(WALLET, {limit: 25}, "confirmed");
+      let found = null;
+
+      for (const s of sigs) {
+        if (s.err) continue;
+
+        const tx = await connection.getParsedTransaction(s.signature, {
+          commitment: "confirmed",
+          maxSupportedTransactionVersion: 0
+        });
+        if (!tx) continue;
+
+        const instructions = tx.transaction.message.instructions || [];
+        const candidateAddresses = [];
+
+        for (const ix of instructions) {
+          if ("parsed" in ix && ix.program === "system") {
+            const type = ix.parsed?.type;
+            const info = ix.parsed?.info || {};
+            if ((type === "createAccountWithSeed" || type === "createAccount") && info.newAccount) {
+              candidateAddresses.push(info.newAccount);
+            }
+          }
+        }
+
+        for (const addr of candidateAddresses) {
+          try {
+            const pubkey = new PublicKey(addr);
+            const acct = await connection.getAccountInfo(pubkey, "confirmed");
+            if (!acct || !acct.owner.equals(TOKEN_PROGRAM_ID)) continue;
+
+            const mint = await getMint(connection, pubkey, "confirmed", TOKEN_PROGRAM_ID);
+
+            const matches =
+              mint.decimals === 6 &&
+              mint.supply === 0n &&
+              mint.freezeAuthority === null &&
+              mint.mintAuthority?.equals(WALLET);
+
+            if (matches) {
+              found = {
+                mint: pubkey.toBase58(),
+                signature: s.signature,
+                slot: s.slot,
+                confirmationStatus: s.confirmationStatus,
+                blockTime: s.blockTime,
+              };
+              break;
+            }
+          } catch (_) {}
+        }
+
+        if (found) break;
+      }
+
+      if (found) {
+        out(
+          "MAINNET MINT BULUNDU ✓" +
+          "\n\nMint:\n" + found.mint +
+          "\n\nTX:\n" + found.signature +
+          "\nConfirmation: " + found.confirmationStatus +
+          "\nSlot: " + found.slot +
+          "\n\nDecimals: 6" +
+          "\nSupply: 0" +
+          "\nMint authority: doğru Phantom" +
+          "\nFreeze authority: YOK" +
+          "\n\n5. ADIMA TEKRAR BASMA. Bu minti kullanarak devam edebiliriz."
+        );
+      } else {
+        out(
+          "Son 25 işlemde beklenen özelliklerde oluşturulmuş bir mint bulunamadı." +
+          "\n\nBu, önceki denemelerin zincire yazılmamış olabileceğini gösterir." +
+          "\nYeni mint oluşturmadan önce bu sonucu bana gönder."
+        );
+      }
+    } catch (e) {
+      out("HATA: " + (e?.message || String(e)));
+    }
+  };
+</script>
+</body>
+</html>
