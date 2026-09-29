@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>YOK MU? Mainnet — 1 Milyar Basım</title>
+  <style>
+    :root{color-scheme:dark}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0b0d;color:#f4f4f5;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    .card{width:min(92vw,620px);background:#17171b;border:1px solid #2b2b31;border-radius:24px;padding:24px;box-sizing:border-box;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+    .logo{width:92px;height:92px;border-radius:50%;display:block;margin:0 auto 12px}
+    h1{margin:6px 0 4px;text-align:center;font-size:30px}
+    .sub{text-align:center;color:#aaaab2;margin-bottom:22px}
+    .row{background:#101014;border:1px solid #2a2a30;border-radius:16px;padding:14px;margin:10px 0;overflow-wrap:anywhere}
+    .label{color:#91919a;font-size:13px;margin-bottom:4px}
+    button{width:100%;border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:750;margin-top:12px;cursor:pointer}
+    button:disabled{opacity:.36;cursor:not-allowed}
+    #connect{background:#a78bfa;color:#0b0b0d}
+    #check{background:#60a5fa;color:#07111f}
+    #simulate{background:#38bdf8;color:#04131a}
+    #mint{background:#22c55e;color:#07120a}
+    #status{margin-top:16px;padding:14px;border-radius:14px;background:#101014;border:1px solid #2a2a30;min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
+    .warn{margin-top:16px;color:#fbbf24;font-size:13px;line-height:1.5}
+  </style>
+</head>
+<body>
+<main class="card">
+  <img class="logo" src="./yokmucoin-logo.png" alt="YOK MU? logo">
+  <h1>YOK MU? — MAINNET</h1>
+  <div class="sub">Aşama 2: ATA oluştur + tam 1,000,000,000 YOKMU bas</div>
+
+  <div class="row">
+    <div class="label">Mainnet mint</div>
+    <strong>37gh9QSL2AYJy7VY3i6CdUErxzk9rcsW7aHsP9eVqe71</strong>
+  </div>
+
+  <div class="row">
+    <div class="label">Phantom / mint authority / token sahibi</div>
+    <strong>2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c</strong>
+  </div>
+
+  <div class="row">
+    <div class="label">Basılacak miktar</div>
+    <strong>1,000,000,000 YOKMU</strong><br>
+    6 decimals → 1,000,000,000,000,000 base units
+  </div>
+
+  <button id="connect">1 · Phantom'u Bağla</button>
+  <button id="check" disabled>2 · Mint + ATA + Yetki Kontrolü</button>
+  <button id="simulate" disabled>3 · Mainnet RPC'de Simüle Et</button>
+  <button id="mint" disabled>4 · 1 MİLYAR YOKMU BAS</button>
+
+  <div id="status">Önce Phantom'u bağla. Testnet Mode kapalı olmalı.</div>
+
+  <div class="warn">
+    4. adım gerçek Mainnet işlemidir. Mint authority bu işlemden sonra da sende kalır;
+    bu sayfa authority'yi kaldırmaz. Metadata da bu aşamada değiştirilmez.
+    Phantom kırmızı “İstek engellendi” uyarısı gösterirse devam etme.
+  </div>
+</main>
+
+<script type="module">
+  import {
+    Connection, PublicKey, Transaction
+  } from "https://esm.sh/@solana/web3.js@1.98.4?bundle";
+
+  import {
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    ACCOUNT_SIZE,
+    getMint,
+    getAccount,
+    getAssociatedTokenAddressSync,
+    createAssociatedTokenAccountInstruction,
+    createMintToCheckedInstruction
+  } from "https://esm.sh/@solana/spl-token@0.4.14?bundle";
+
+  const RPC = "https://solana-rpc.publicnode.com";
+  const WALLET = new PublicKey("2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c");
+  const MINT = new PublicKey("37gh9QSL2AYJy7VY3i6CdUErxzk9rcsW7aHsP9eVqe71");
+  const DECIMALS = 6;
+  const TOKEN_AMOUNT = 1_000_000_000n;
+  const RAW_AMOUNT = TOKEN_AMOUNT * 1_000_000n;
+
+  const connection = new Connection(RPC, "confirmed");
+
+  const $ = id => document.getElementById(id);
+  const connectBtn = $("connect");
+  const checkBtn = $("check");
+  const simulateBtn = $("simulate");
+  const mintBtn = $("mint");
+  const status = $("status");
+
+  let provider = null;
+  let connected = null;
+  let ata = null;
+  let ataExists = false;
+  let ataRent = 0;
+
+  const setStatus = t => status.textContent = t;
+
+  function getProvider(){
+    const p = window.phantom?.solana || window.solana;
+    return p?.isPhantom ? p : null;
+  }
+
+  async function readAndValidateState(requireZeroSupply = true) {
+    const mintInfo = await getMint(connection, MINT, "confirmed", TOKEN_PROGRAM_ID);
+
+    if (mintInfo.decimals !== DECIMALS) {
+      throw new Error("Mint decimals beklenen değer değil.");
+    }
+    if (!mintInfo.mintAuthority || !mintInfo.mintAuthority.equals(WALLET)) {
+      throw new Error("Mint authority beklenen Phantom hesabı değil.");
+    }
+    if (mintInfo.freezeAuthority !== null) {
+      throw new Error("Freeze authority beklenmedik şekilde mevcut.");
+    }
+    if (requireZeroSupply && mintInfo.supply !== 0n) {
+      throw new Error(
+        "Supply artık 0 değil: " +
+        (mintInfo.supply / 1_000_000n).toString() +
+        " YOKMU. Tekrar basım yapılmayacak."
+      );
+    }
+
+    ata = getAssociatedTokenAddressSync(
+      MINT,
+      WALLET,
+      false,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const ataInfo = await connection.getAccountInfo(ata, "confirmed");
+    ataExists = !!ataInfo;
+
+    let ataBalance = 0n;
+    if (ataExists) {
+      const tokenAccount = await getAccount(
+        connection, ata, "confirmed", TOKEN_PROGRAM_ID
+      );
+      if (!tokenAccount.mint.equals(MINT) || !tokenAccount.owner.equals(WALLET)) {
+        throw new Error("Mevcut ATA beklenen mint/sahip ile eşleşmiyor.");
+      }
+      ataBalance = tokenAccount.amount;
+    }
+
+    return { mintInfo, ataBalance };
+  }
+
+  async function buildTx() {
+    const { mintInfo } = await readAndValidateState(true);
+
+    const latest = await connection.getLatestBlockhash("confirmed");
+    const tx = new Transaction();
+
+    if (!ataExists) {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          WALLET,
+          ata,
+          WALLET,
+          MINT,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      );
+    }
+
+    tx.add(
+      createMintToCheckedInstruction(
+        MINT,
+        ata,
+        WALLET,
+        RAW_AMOUNT,
+        DECIMALS,
+        [],
+        TOKEN_PROGRAM_ID
+      )
+    );
+
+    tx.feePayer = WALLET;
+    tx.recentBlockhash = latest.blockhash;
+    return { tx, latest, mintInfo };
+  }
+
+  async function waitForSignature(signature, maxMs = 90000) {
+    const start = Date.now();
+
+    while (Date.now() - start < maxMs) {
+      const r = await connection.getSignatureStatuses(
+        [signature],
+        { searchTransactionHistory: true }
+      );
+      const s = r.value[0];
+
+      if (s) {
+        if (s.err) {
+          throw new Error("Mainnet transaction hata verdi: " + JSON.stringify(s.err));
+        }
+        if (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized") {
+          return s.confirmationStatus;
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    return "timeout";
+  }
+
+  connectBtn.onclick = async () => {
+    try {
+      provider = getProvider();
+      if (!provider) throw new Error("Phantom provider bulunamadı. Sayfayı Phantom içinden aç.");
+
+      const r = await provider.connect();
+      connected = r.publicKey;
+
+      if (!connected.equals(WALLET)) {
+        throw new Error("Yanlış Phantom hesabı:\n" + connected.toBase58());
+      }
+
+      connectBtn.textContent = "Phantom Bağlandı ✓";
+      checkBtn.disabled = false;
+      simulateBtn.disabled = true;
+      mintBtn.disabled = true;
+
+      setStatus("Doğru Phantom hesabı bağlı:\n" + connected.toBase58());
+    } catch(e) {
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+
+  checkBtn.onclick = async () => {
+    try {
+      if (!connected) throw new Error("Önce Phantom'u bağla.");
+
+      const [{ mintInfo, ataBalance }, lamports, rent] = await Promise.all([
+        readAndValidateState(true),
+        connection.getBalance(WALLET, "confirmed"),
+        connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE)
+      ]);
+
+      ataRent = rent;
+
+      setStatus(
+        "KONTROL BAŞARILI ✓" +
+        "\n\nMint: " + MINT.toBase58() +
+        "\nDecimals: " + mintInfo.decimals +
+        "\nSupply: 0" +
+        "\nMint authority: DOĞRU" +
+        "\nFreeze authority: YOK" +
+        "\n\nPhantom Mainnet SOL: " + (lamports / 1e9) + " SOL" +
+        "\nATA:\n" + ata.toBase58() +
+        "\nATA durumu: " + (ataExists ? "VAR" : "YOK — işlem içinde oluşturulacak") +
+        "\nATA bakiye: " + (ataBalance / 1_000_000n).toString() + " YOKMU" +
+        (ataExists ? "" : "\nATA rent yaklaşık: " + (ataRent / 1e9).toFixed(9) + " SOL")
+      );
+
+      simulateBtn.disabled = false;
+      mintBtn.disabled = true;
+    } catch(e) {
+      simulateBtn.disabled = true;
+      mintBtn.disabled = true;
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+
+  simulateBtn.onclick = async () => {
+    try {
+      const { tx } = await buildTx();
+
+      const sim = await connection.simulateTransaction(tx);
+      if (sim.value.err) {
+        throw new Error("Mainnet RPC simülasyonu başarısız:\n" + JSON.stringify(sim.value.err));
+      }
+
+      const fee = await connection.getFeeForMessage(tx.compileMessage(), "confirmed");
+      const feeSol = fee.value == null ? "okunamadı" : (fee.value / 1e9).toFixed(9);
+
+      setStatus(
+        "MAINNET SİMÜLASYONU BAŞARILI ✓" +
+        "\n\nMint: " + MINT.toBase58() +
+        "\nHedef ATA:\n" + ata.toBase58() +
+        "\nATA: " + (ataExists ? "zaten mevcut" : "oluşturulacak") +
+        "\nBasılacak: 1,000,000,000 YOKMU" +
+        "\nRaw amount: " + RAW_AMOUNT.toString() +
+        "\nTahmini network fee: " + feeSol + " SOL" +
+        (ataExists ? "" : "\nATA rent yaklaşık: " + (ataRent / 1e9).toFixed(9) + " SOL") +
+        "\n\nHenüz hiçbir işlem imzalanmadı."
+      );
+
+      mintBtn.disabled = false;
+    } catch(e) {
+      mintBtn.disabled = true;
+      setStatus("HATA: " + (e?.message || String(e)));
+    }
+  };
+
+  mintBtn.onclick = async () => {
+    try {
+      mintBtn.disabled = true;
+      simulateBtn.disabled = true;
+
+      // Fresh state check immediately before building.
+      await readAndValidateState(true);
+      const { tx } = await buildTx();
+
+      setStatus(
+        "Phantom onayı bekleniyor..." +
+        "\n\nGERÇEK MAINNET İŞLEMİ" +
+        "\n1,000,000,000 YOKMU → kendi Phantom ATA'n"
+      );
+
+      const result = await provider.signAndSendTransaction(tx);
+      const signature = result?.signature;
+
+      if (!signature) {
+        throw new Error("Phantom transaction signature döndürmedi.");
+      }
+
+      setStatus(
+        "Phantom işlemi gönderdi ✓" +
+        "\n\nTX:\n" + signature +
+        "\n\nZincir durumu kontrol ediliyor..."
+      );
+
+      const confirmation = await waitForSignature(signature, 90000);
+
+      // Do not rely only on blockhash confirmation. Verify chain state directly.
+      let mintInfo, tokenAccount;
+      try {
+        mintInfo = await getMint(connection, MINT, "confirmed", TOKEN_PROGRAM_ID);
+        tokenAccount = await getAccount(connection, ata, "confirmed", TOKEN_PROGRAM_ID);
+      } catch (e) {
+        if (confirmation === "timeout") {
+          throw new Error(
+            "İşlem imzası alındı ancak durum henüz kesinleşmedi.\nTX:\n" +
+            signature +
+            "\n\nTEKRAR BASMA. Biraz sonra zincir durumunu kontrol et."
+          );
+        }
+        throw e;
+      }
+
+      const supplyOk = mintInfo.supply === RAW_AMOUNT;
+      const balanceOk = tokenAccount.amount === RAW_AMOUNT;
+      const authorityOk = mintInfo.mintAuthority?.equals(WALLET);
+      const freezeOk = mintInfo.freezeAuthority === null;
+
+      if (!supplyOk || !balanceOk || !authorityOk || !freezeOk) {
+        throw new Error(
+          "İşlem gönderildi fakat zincir durumu beklenen değerlerle eşleşmedi.\nTX:\n" +
+          signature +
+          "\n\nTEKRAR BASMA."
+        );
+      }
+
+      setStatus(
+        "1,000,000,000 YOKMU BAŞARIYLA BASILDI ✓" +
+        "\n\nMint:\n" + MINT.toBase58() +
+        "\nATA:\n" + ata.toBase58() +
+        "\nToplam arz: 1,000,000,000 YOKMU" +
+        "\nPhantom bakiyesi: 1,000,000,000 YOKMU" +
+        "\nDecimals: 6" +
+        "\nMint authority: HALA VAR" +
+        "\nFreeze authority: YOK" +
+        "\nConfirmation: " + confirmation +
+        "\n\nTX:\n" + signature +
+        "\n\nDUR: Metadata ve son kontroller yapılmadan mint authority kaldırılmayacak."
+      );
+
+      mintBtn.textContent = "1 Milyar YOKMU Basıldı ✓";
+    } catch(e) {
+      // Important: never invite an immediate retry after a submitted tx.
+      mintBtn.disabled = true;
+      setStatus("HATA / DURUM:\n" + (e?.message || String(e)));
+    }
+  };
+</script>
+</body>
+</html>
