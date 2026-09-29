@@ -1,0 +1,30 @@
+{
+  "name": "YOK MU?",
+  "symbol": "YOKMU",
+  "description": "YOK MU? is a Solana token with a fixed supply of 1,000,000,000 YOKMU and 6 decimals.",
+  "image": "https://yokmucoin-dev.github.io/yokmucoin/yokmucoin-logo.png",
+  "external_url": "https://yokmucoin-dev.github.io/yokmucoin/",
+  "attributes": [
+    {
+      "trait_type": "Network",
+      "value": "Solana Mainnet"
+    },
+    {
+      "trait_type": "Supply",
+      "value": "1,000,000,000"
+    },
+    {
+      "trait_type": "Decimals",
+      "value": "6"
+    }
+  ],
+  "properties": {
+    "files": [
+      {
+        "uri": "https://yokmucoin-dev.github.io/yokmucoin/yokmucoin-logo.png",
+        "type": "image/png"
+      }
+    ],
+    "category": "image"
+  }
+}
