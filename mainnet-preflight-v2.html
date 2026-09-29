@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>YOK MU? Mainnet Ön Kontrol</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#0b0b0d; color:#f4f4f5; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+    .card { width:min(92vw,560px); background:#17171b; border:1px solid #2b2b31; border-radius:24px; padding:24px; box-sizing:border-box; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+    .logo { width:92px; height:92px; border-radius:50%; display:block; margin:0 auto 12px; }
+    h1 { margin:6px 0 4px; text-align:center; font-size:30px; }
+    .sub { text-align:center; color:#aaaab2; margin-bottom:22px; }
+    .row { background:#101014; border:1px solid #2a2a30; border-radius:16px; padding:14px; margin:10px 0; overflow-wrap:anywhere; }
+    .label { color:#91919a; font-size:13px; margin-bottom:4px; }
+    button { width:100%; border:0; border-radius:16px; padding:16px; font-size:17px; font-weight:700; margin-top:12px; cursor:pointer; }
+    #connect { background:#a78bfa; color:#0b0b0d; }
+    #check { background:#60a5fa; color:#07111f; }
+    button:disabled { opacity:.38; cursor:not-allowed; }
+    #status { margin-top:16px; padding:14px; border-radius:14px; background:#101014; border:1px solid #2a2a30; min-height:24px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .warn { margin-top:16px; color:#fbbf24; font-size:13px; line-height:1.5; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img class="logo" src="./yokmucoin-logo.png" alt="YOK MU? logo" />
+    <h1>YOK MU? — MAINNET</h1>
+    <div class="sub">Salt-okunur ön kontrol — hiçbir işlem imzalanmaz</div>
+
+    <div class="row">
+      <div class="label">Beklenen Phantom adresi</div>
+      <strong>2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c</strong>
+    </div>
+
+    <div class="row">
+      <div class="label">Final metadata</div>
+      https://yokmucoin-dev.github.io/yokmucoin/yokmu.json
+    </div>
+
+    <div class="row">
+      <div class="label">Planlanan token parametreleri</div>
+      YOK MU? · YOKMU · 6 decimals · 1,000,000,000 final supply
+    </div>
+
+    <button id="connect">1 · Phantom'u Bağla</button>
+    <button id="check" disabled>2 · Mainnet Ön Kontrol</button>
+
+    <div id="status">Phantom'da Testnet Mode kapalı olsun ve doğru hesabı seç.</div>
+
+    <div class="warn">
+      Bu sayfa token oluşturmaz, SOL göndermez ve imza istemez. 
+      Sadece mainnet bakiyesini ve metadata dosyasını kontrol eder.
+    </div>
+  </main>
+
+  <script type="module">
+    import { Connection, PublicKey } from "https://esm.sh/@solana/web3.js@1.98.4?bundle";
+
+    const EXPECTED = new PublicKey("2ZCL5v23jSeEC81tuUo9mYfVnUGVfkiyGT26VCQ2X99c");
+    const METADATA_URL = "https://yokmucoin-dev.github.io/yokmucoin/yokmu.json";
+
+    // Read-only preflight fallbacks. No API key is stored in this file.
+    const RPCS = [
+      "https://solana-rpc.publicnode.com",
+      "https://api.mainnet.solana.com",
+      "https://api.mainnet-beta.solana.com"
+    ];
+
+    const connectBtn = document.getElementById("connect");
+    const checkBtn = document.getElementById("check");
+    const status = document.getElementById("status");
+
+    let provider = null;
+    let wallet = null;
+
+    const setStatus = (t) => status.textContent = t;
+
+    function getProvider() {
+      const p = window.phantom?.solana || window.solana;
+      return p?.isPhantom ? p : null;
+    }
+
+    async function getWorkingConnection() {
+      const errors = [];
+      for (const rpc of RPCS) {
+        try {
+          const c = new Connection(rpc, "confirmed");
+          await c.getLatestBlockhash("confirmed");
+          return { connection: c, rpc };
+        } catch (e) {
+          errors.push(rpc + " → " + (e?.message || String(e)));
+        }
+      }
+      throw new Error("Mainnet RPC bulunamadı.\n\n" + errors.join("\n"));
+    }
+
+    connectBtn.addEventListener("click", async () => {
+      try {
+        provider = getProvider();
+        if (!provider) throw new Error("Phantom provider bulunamadı. Sayfayı Phantom içinden aç.");
+
+        const response = await provider.connect();
+        wallet = response.publicKey;
+
+        if (!wallet.equals(EXPECTED)) {
+          checkBtn.disabled = true;
+          throw new Error("Yanlış Phantom hesabı bağlı:\n" + wallet.toBase58());
+        }
+
+        connectBtn.textContent = "Phantom Bağlandı ✓";
+        checkBtn.disabled = false;
+        setStatus("Doğru hesap bağlandı:\n" + wallet.toBase58() + "\n\nŞimdi Mainnet Ön Kontrol'e bas.");
+      } catch (e) {
+        setStatus("HATA: " + (e?.message || String(e)));
+      }
+    });
+
+    checkBtn.addEventListener("click", async () => {
+      try {
+        if (!wallet) throw new Error("Önce Phantom'u bağla.");
+        setStatus("Mainnet RPC ve metadata kontrol ediliyor...");
+
+        const { connection, rpc } = await getWorkingConnection();
+
+        const lamports = await connection.getBalance(wallet, "confirmed");
+        const sol = lamports / 1_000_000_000;
+
+        const metaResponse = await fetch(METADATA_URL + "?t=" + Date.now(), { cache:"no-store" });
+        if (!metaResponse.ok) throw new Error("Metadata HTTP hatası: " + metaResponse.status);
+
+        const metadata = await metaResponse.json();
+        if (metadata?.name !== "YOK MU?" || metadata?.symbol !== "YOKMU" || !metadata?.image) {
+          throw new Error("Metadata final değerlerle eşleşmiyor.");
+        }
+
+        setStatus(
+          "MAINNET ÖN KONTROL BAŞARILI ✓" +
+          "\n\nPhantom: " + wallet.toBase58() +
+          "\nMainnet SOL: " + sol + " SOL" +
+          "\nRPC: " + rpc +
+          "\nMetadata: OK" +
+          "\nName: " + metadata.name +
+          "\nSymbol: " + metadata.symbol +
+          "\nImage: OK" +
+          "\n\nHiçbir transaction oluşturulmadı veya imzalanmadı."
+        );
+      } catch (e) {
+        setStatus("HATA: " + (e?.message || String(e)));
+      }
+    });
+  </script>
+</body>
+</html>
